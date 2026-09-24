@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App matching</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; }
+    .row { display: grid; grid-template-columns: 110px 1fr 56px; gap: 12px; align-items: center; margin: 12px 0; }
+    input[type=range] { width: 100%; }
+    button { padding: 8px 20px; font-size: 1rem; }
+    #message { margin-top: 16px; }
+    .error { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h1>App matching</h1>
+  <p id="message">Loading…</p>
+  <form id="panel" hidden>
+    <p>Share your interest across the topics (shares always add up to 100%).</p>
+    <div id="rows"></div>
+    <button type="submit">Submit</button>
+  </form>
+
+  <script>
+    const API_URL = "http://localhost:8000";
+    const message = document.getElementById("message");
+    const panel = document.getElementById("panel");
+    const rows = document.getElementById("rows");
+    let sessionId, labels, sliders = [];
+
+    function show(text, isError = false) {
+      message.textContent = text;
+      message.className = isError ? "error" : "";
+    }
+
+    // sliders are raw weights; the values sent are the weights normalized to sum to 1
+    function shares() {
+      const weights = sliders.map(s => Number(s.value));
+      const total = weights.reduce((a, b) => a + b, 0);
+      return total === 0 ? null : weights.map(w => w / total);
+    }
+
+    function refresh() {
+      const values = shares();
+      sliders.forEach((s, i) => {
+        s.nextElementSibling.textContent = values ? Math.round(values[i] * 100) + "%" : "–";
+      });
+      panel.querySelector("button").disabled = !values;
+    }
+
+    function render(values) {
+      rows.innerHTML = "";
+      sliders = labels.map((label, i) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.innerHTML = `<label>${label}</label><input type="range" min="0" max="1" step="0.01"><span></span>`;
+        const slider = row.querySelector("input");
+        slider.value = values[i];
+        slider.addEventListener("input", refresh);
+        rows.appendChild(row);
+        return slider;
+      });
+      refresh();
+    }
+
+    async function init() {
+      try {
+        const status = await (await fetch(`${API_URL}/server/status`)).json();
+        if (!status.active) return show("The panel is not active at the moment.");
+        const res = await fetch(`${API_URL}/session/start`, { method: "POST" });
+        if (!res.ok) return show((await res.json()).detail || "Could not start a session.", true);
+        const session = await res.json();
+        sessionId = session.session_id;
+        labels = session.labels;
+        render(session.values);
+        show("");
+        panel.hidden = false;
+      } catch {
+        show("The server cannot be reached.", true);
+      }
+    }
+
+    panel.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const values = shares();
+      if (!values) return;
+      const summary = labels.map((l, i) => `${l}: ${Math.round(values[i] * 100)}%`).join("\n");
+      if (!confirm(`Submit these answers? This cannot be undone.\n\n${summary}`)) return;
+      try {
+        const res = await fetch(`${API_URL}/session/submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
+          body: JSON.stringify({ values, labels }),
+        });
+        if (!res.ok) return show((await res.json()).detail || "Submission failed.", true);
+        panel.hidden = true;
+        show("Thank you, your answers have been recorded.");
+      } catch {
+        show("The server cannot be reached.", true);
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>
