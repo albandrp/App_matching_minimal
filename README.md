@@ -5,9 +5,9 @@ admin/root-protected control panel + session-based submissions, jsonl/JSON
 file storage, brute-force protection. No Pydantic models, no settings
 library, no rate-limiting library — just FastAPI and the standard library.
 
-See [../app_matching](../app_matching) for the same spec built as a proper
+See [App_matching](https://github.com/albandrp/App_matching) for the same spec built as a proper
 multi-module package (typed config, Pydantic validation, `slowapi`, tests,
-Docker) — this repo exists to compare the two.
+Docker).
 
 ## Run
 
