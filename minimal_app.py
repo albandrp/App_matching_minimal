@@ -1,26 +1,50 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import random
 import secrets
 import threading
 import time
+import tomllib
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field, field_validator
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 ROOT_PASSWORD = os.environ.get("ROOT_PASSWORD")
 if not ADMIN_PASSWORD or not ROOT_PASSWORD:
     raise RuntimeError("ADMIN_PASSWORD and ROOT_PASSWORD must be set")
 LABELS = ["AI", "GameTheory", "Maths", "Stats", "History"]
+# single source of truth for the version: pyproject.toml
+APP_VERSION = tomllib.loads(Path(__file__).with_name("pyproject.toml").read_text())["project"]["version"]
+
+
+class Item(BaseModel):
+    label: str
+    score: Annotated[float, Field(ge=0, le=1)]
+
+
+class Submission(BaseModel):
+    session_id: str
+    # the session's items, in the user's order (position 0 = most preferred);
+    # the user only reorders them, so labels and scores must match the session's
+    items: list[Item]
+
+    @field_validator("items")
+    @classmethod
+    def items_are_each_label_once(cls, items: list[Item]) -> list[Item]:
+        if sorted(item.label for item in items) != sorted(LABELS):
+            raise ValueError(f"items must contain each of {LABELS} exactly once")
+        return items
+
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "data"))
 DATA_FILE = DATA_DIR / "data.jsonl"
@@ -36,8 +60,22 @@ if not SESSIONS_FILE.exists():
 if not STATE_FILE.exists():
     STATE_FILE.write_text(json.dumps({"active": False}))
 
-app = FastAPI(title="app-matching (minimal)")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="app-matching (minimal)", version=APP_VERSION)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-App-Version"],
+)
+
+
+# every response carries the version, even errors (e.g. the 403 while the panel is inactive)
+@app.middleware("http")
+async def add_version_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-App-Version"] = APP_VERSION
+    return response
 
 
 def read_json(path: Path):
@@ -61,7 +99,8 @@ def is_active() -> bool:
 
 # brute-force protection: N requests per IP per rolling window 
 
-RATE_LIMITS = {"admin": (5, 60), "session": (10, 60)}  # (max hits, window seconds)
+# session limit is per IP, and many participants can share one (classroom, NAT)
+RATE_LIMITS = {"admin": (5, 60), "session": (100, 60)}  # (max hits, window seconds)
 _hits: dict[tuple[str, str], list[float]] = defaultdict(list)
 
 
@@ -91,12 +130,17 @@ def require_root(x_root_password: str = Header(...)) -> None:
         raise HTTPException(401, "Invalid root password")
 
 
+def require_active() -> None:
+    # a dependency, so it runs before body validation: inactive always means 403
+    if not is_active():
+        raise HTTPException(403, "Server is not active")
+
+
 # server
-
-@app.get("/server/status")
-def status() -> dict:
-    return {"active": is_active()}
-
+#
+# No /server/status route: the spec names exactly 7 routes and this isn't
+# one of them. The frontend finds out whether the panel is active by
+# calling /session/start directly and treating a 403 as "inactive".
 
 @app.post("/server/activate", dependencies=[Depends(rate_limit("admin")), Depends(require_root)])
 def activate() -> dict:
@@ -127,18 +171,26 @@ def reset() -> dict:
 def statistics() -> dict:
     submissions = [json.loads(line) for line in DATA_FILE.read_text().splitlines() if line.strip()]
     sessions = read_json(SESSIONS_FILE)
-    sums: dict[str, float] = {}
-    counts: dict[str, int] = {}
-    for record in submissions:
-        for label, value in zip(record["labels"], record["values"]):
-            sums[label] = sums.get(label, 0.0) + value
-            counts[label] = counts.get(label, 0) + 1
+    orders = [[item["label"] for item in r["items"]] for r in submissions]
+    n = len(submissions) or 1  # avoid dividing by zero before the first submission
     return {
+        "version": APP_VERSION,
         "active": is_active(),
         "total_submissions": len(submissions),
         "total_sessions": len(sessions),
         "used_sessions": sum(1 for s in sessions.values() if s["used"]),
-        "average_value_by_label": {label: sums[label] / counts[label] for label in sums},
+        # rank 1 = most preferred
+        "average_rank_by_label": {
+            label: sum(order.index(label) + 1 for order in orders) / n for label in LABELS
+        },
+        "ranked_first_count": {
+            label: sum(1 for order in orders if order[0] == label) for label in LABELS
+        },
+        # items start sorted by score: how many users submitted that order unchanged
+        "kept_initial_order": sum(
+            1 for r in submissions
+            if [i["score"] for i in r["items"]] == sorted((i["score"] for i in r["items"]), reverse=True)
+        ),
     }
 
 
@@ -149,62 +201,44 @@ def export() -> FileResponse:
 
 # session
 
-@app.post("/session/start", dependencies=[Depends(rate_limit("session"))])
+@app.post("/session/start", dependencies=[Depends(rate_limit("session")), Depends(require_active)])
 def start() -> dict:
-    if not is_active():
-        raise HTTPException(403, "Server is not active")
     session_id = uuid.uuid4().hex
-    # session content: 5 random values summing to 1, one per label
+    # session content: one random score per label, summing to 1, sorted by score
     draws = [random.random() for _ in LABELS]
-    values = [d / sum(draws) for d in draws]
+    items = [Item(label=label, score=d / sum(draws)) for label, d in zip(LABELS, draws)]
+    items.sort(key=lambda item: item.score, reverse=True)
+    items = [item.model_dump() for item in items]
     with _lock:
         sessions = read_json(SESSIONS_FILE)
         sessions[session_id] = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "used": False,
-            "values": values,
-            "labels": LABELS,
+            "items": items,
         }
         write_json(SESSIONS_FILE, sessions)
-    return {"session_id": session_id, "values": values, "labels": LABELS}
+    return {"session_id": session_id, "items": items}
 
 
-@app.post("/session/submit", dependencies=[Depends(rate_limit("session"))])
-def submit(payload: dict, x_session_id: str = Header(...)) -> dict:
-    if not is_active():
-        raise HTTPException(403, "Server is not active")
-
-    values = payload.get("values")
-    labels = payload.get("labels")
-    if not (
-        isinstance(values, list)
-        and len(values) == 5
-        and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in values)
-    ):
-        raise HTTPException(422, "values must be 5 numbers between 0 and 1")
-    if not math.isclose(sum(values), 1.0, abs_tol=1e-6):
-        raise HTTPException(422, f"values must sum to 1 (got {sum(values)})")
-    if not (isinstance(labels, list) and sorted(labels) == sorted(LABELS)):
-        raise HTTPException(422, f"labels must be each of {LABELS} exactly once")
-
+@app.post("/session/submit", dependencies=[Depends(rate_limit("session")), Depends(require_active)])
+def submit(payload: Submission) -> dict:
     record = {
         "id": uuid.uuid4().hex,
-        "session_id": x_session_id,
         "submitted_at": datetime.now(timezone.utc).isoformat(),
-        "values": values,
-        "labels": labels,
+        **payload.model_dump(),
     }
     with _lock:
         sessions = read_json(SESSIONS_FILE)
-        session = sessions.get(x_session_id)
+        session = sessions.get(payload.session_id)
         if session is None:
             raise HTTPException(401, "Unknown session")
         if session["used"]:
             raise HTTPException(409, "Session already submitted")
+        drawn = {item["label"]: item["score"] for item in session["items"]}
+        if {item.label: item.score for item in payload.items} != drawn:
+            raise HTTPException(422, "items must be the session's items, only reordered")
         with DATA_FILE.open("a") as f:
             f.write(json.dumps(record) + "\n")
         session["used"] = True
         write_json(SESSIONS_FILE, sessions)
     return record
-
-# travailler avec pydantic pour valider les payloads

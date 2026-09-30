@@ -4,76 +4,96 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>App matching</title>
+  <link rel="icon" href="data:,">
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 520px; margin: 40px auto; padding: 0 16px; }
-    .row { display: grid; grid-template-columns: 110px 1fr 56px; gap: 12px; align-items: center; margin: 12px 0; }
-    input[type=range] { width: 100%; }
-    button { padding: 8px 20px; font-size: 1rem; }
-    #message { margin-top: 16px; }
+    body { font-family: system-ui, sans-serif; font-size: 18px; max-width: 520px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.5rem; }
+    ol { padding: 0; list-style: none; }
+    .item { display: grid; grid-template-columns: 32px 1fr auto 56px 56px; gap: 8px; align-items: center;
+            padding: 8px; margin: 8px 0; border: 1px solid #ccc; border-radius: 10px; }
+    .item b { font-size: 1.2rem; text-align: center; }
+    .item .score { color: #555; }
+    .item button { height: 56px; font-size: 1.4rem; border-radius: 8px; }
+    #submit { width: 100%; height: 60px; font-size: 1.2rem; border-radius: 10px; margin-top: 8px; }
+    #message { margin: 16px 0; }
     .error { color: #b00020; }
+    footer { margin-top: 32px; font-size: 0.8rem; color: #777; line-height: 1.6; word-break: break-all; }
   </style>
 </head>
 <body>
   <h1>App matching</h1>
   <p id="message">Loading…</p>
+
   <form id="panel" hidden>
-    <p>Share your interest across the topics (shares always add up to 100%).</p>
-    <div id="rows"></div>
-    <button type="submit">Submit</button>
+    <p>Rank the topics by preference: move your favourite to the top with ↑ / ↓.</p>
+    <ol id="items"></ol>
+    <button type="submit" id="submit">Submit</button>
   </form>
+
+  <footer>
+    <div id="session"></div>
+    <div id="version"></div>
+  </footer>
 
   <script>
     const API_URL = "http://localhost:8000";
     const message = document.getElementById("message");
     const panel = document.getElementById("panel");
-    const rows = document.getElementById("rows");
-    let sessionId, labels, sliders = [];
+    const list = document.getElementById("items");
+    let sessionId, items = [];
+
+    // FastAPI puts a string in `detail`, or a list of {msg, ...} for validation errors
+    async function errorText(res, fallback) {
+      const { detail } = await res.json();
+      return Array.isArray(detail) ? detail.map(d => d.msg).join("; ") : detail || fallback;
+    }
 
     function show(text, isError = false) {
       message.textContent = text;
       message.className = isError ? "error" : "";
     }
 
-    // sliders are raw weights; the values sent are the weights normalized to sum to 1
-    function shares() {
-      const weights = sliders.map(s => Number(s.value));
-      const total = weights.reduce((a, b) => a + b, 0);
-      return total === 0 ? null : weights.map(w => w / total);
+    // every API response carries the app version in a header
+    function showVersion(res) {
+      document.getElementById("version").textContent = "Version " + (res.headers.get("X-App-Version") || "?");
     }
 
-    function refresh() {
-      const values = shares();
-      sliders.forEach((s, i) => {
-        s.nextElementSibling.textContent = values ? Math.round(values[i] * 100) + "%" : "–";
-      });
-      panel.querySelector("button").disabled = !values;
+    const pct = score => Math.round(score * 100) + "%";
+
+    function move(i, delta) {
+      [items[i], items[i + delta]] = [items[i + delta], items[i]];
+      render();
     }
 
-    function render(values) {
-      rows.innerHTML = "";
-      sliders = labels.map((label, i) => {
-        const row = document.createElement("div");
-        row.className = "row";
-        row.innerHTML = `<label>${label}</label><input type="range" min="0" max="1" step="0.01"><span></span>`;
-        const slider = row.querySelector("input");
-        slider.value = values[i];
-        slider.addEventListener("input", refresh);
-        rows.appendChild(row);
-        return slider;
+    function render() {
+      list.innerHTML = "";
+      items.forEach((item, i) => {
+        const li = document.createElement("li");
+        li.className = "item";
+        li.innerHTML = `<b>${i + 1}</b><span>${item.label}</span><span class="score">${pct(item.score)}</span>`
+          + `<button type="button" aria-label="Move up">↑</button><button type="button" aria-label="Move down">↓</button>`;
+        const [up, down] = li.querySelectorAll("button");
+        up.disabled = i === 0;
+        down.disabled = i === items.length - 1;
+        up.onclick = () => move(i, -1);
+        down.onclick = () => move(i, 1);
+        list.appendChild(li);
       });
-      refresh();
     }
 
     async function init() {
       try {
-        const status = await (await fetch(`${API_URL}/server/status`)).json();
-        if (!status.active) return show("The panel is not active at the moment.");
+        // No status route in the spec: session/start itself is how you find
+        // out whether the panel is active (it 403s while inactive).
         const res = await fetch(`${API_URL}/session/start`, { method: "POST" });
-        if (!res.ok) return show((await res.json()).detail || "Could not start a session.", true);
+        showVersion(res);
+        if (res.status === 403) return show("The panel is not active at the moment.");
+        if (!res.ok) return show(await errorText(res, "Could not start a session."), true);
         const session = await res.json();
         sessionId = session.session_id;
-        labels = session.labels;
-        render(session.values);
+        items = session.items; // already sorted by score
+        document.getElementById("session").textContent = "Session " + sessionId;
+        render();
         show("");
         panel.hidden = false;
       } catch {
@@ -83,17 +103,15 @@
 
     panel.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const values = shares();
-      if (!values) return;
-      const summary = labels.map((l, i) => `${l}: ${Math.round(values[i] * 100)}%`).join("\n");
-      if (!confirm(`Submit these answers? This cannot be undone.\n\n${summary}`)) return;
+      const order = items.map((item, i) => `${i + 1}. ${item.label} (${pct(item.score)})`).join("\n");
+      if (!confirm(`Submit this ranking? This cannot be undone.\n\n${order}`)) return;
       try {
         const res = await fetch(`${API_URL}/session/submit`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-Session-Id": sessionId },
-          body: JSON.stringify({ values, labels }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId, items }),
         });
-        if (!res.ok) return show((await res.json()).detail || "Submission failed.", true);
+        if (!res.ok) return show(await errorText(res, "Submission failed."), true);
         panel.hidden = true;
         show("Thank you, your answers have been recorded.");
       } catch {

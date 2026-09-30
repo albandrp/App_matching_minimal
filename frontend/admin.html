@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App matching admin</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: system-ui, sans-serif; font-size: 18px; max-width: 640px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.5rem; }
+    form { display: flex; gap: 8px; }
+    input, button { height: 48px; font-size: 1rem; border-radius: 8px; }
+    input { flex: 1; min-width: 0; padding: 0 12px; border: 1px solid #ccc; }
+    button { padding: 0 20px; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    pre { background: #f4f4f4; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; }
+    #message { margin: 16px 0; }
+    .error { color: #b00020; }
+    footer { margin-top: 32px; font-size: 0.8rem; color: #777; }
+  </style>
+</head>
+<body>
+  <h1>App matching — admin</h1>
+
+  <form id="login">
+    <input type="password" id="password" placeholder="Admin password" autocomplete="current-password" required>
+    <button type="submit">Refresh</button>
+  </form>
+
+  <p id="message"></p>
+  <div id="stats" hidden>
+    <table>
+      <tbody id="summary"></tbody>
+    </table>
+    <table>
+      <thead><tr><th>Label</th><th class="num">Average rank</th><th class="num">Ranked first</th></tr></thead>
+      <tbody id="labels"></tbody>
+    </table>
+    <details>
+      <summary>Raw payload</summary>
+      <pre id="raw"></pre>
+    </details>
+  </div>
+
+  <footer id="version"></footer>
+
+  <script>
+    const API_URL = "http://localhost:8000";
+    const message = document.getElementById("message");
+
+    function show(text, isError = false) {
+      message.textContent = text;
+      message.className = isError ? "error" : "";
+    }
+
+    function rows(tbody, data) {
+      document.getElementById(tbody).innerHTML = data
+        .map(cells => "<tr>" + cells.map((c, i) => `<td class="${i ? "num" : ""}">${c}</td>`).join("") + "</tr>")
+        .join("");
+    }
+
+    // the password only lives in the input field, it is sent in a header on each refresh
+    document.getElementById("login").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      show("Loading…");
+      try {
+        const res = await fetch(`${API_URL}/server/statistics`, {
+          headers: { "X-Admin-Password": document.getElementById("password").value },
+        });
+        document.getElementById("version").textContent = "Version " + (res.headers.get("X-App-Version") || "?");
+        const data = await res.json();
+        if (!res.ok) {
+          document.getElementById("stats").hidden = true;
+          return show(data.detail || "Request failed.", true);
+        }
+        rows("summary", [
+          ["Panel", data.active ? "active" : "inactive"],
+          ["Sessions started", data.total_sessions],
+          ["Submissions", data.total_submissions],
+          ["Kept the initial order", data.kept_initial_order],
+        ]);
+        rows("labels", Object.keys(data.average_rank_by_label).map(label => [
+          label, data.average_rank_by_label[label].toFixed(2), data.ranked_first_count[label],
+        ]));
+        document.getElementById("raw").textContent = JSON.stringify(data, null, 2);
+        document.getElementById("stats").hidden = false;
+        show("Updated at " + new Date().toLocaleTimeString());
+      } catch {
+        show("The server cannot be reached.", true);
+      }
+    });
+  </script>
+</body>
+</html>
