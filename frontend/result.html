@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App matching result</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: system-ui, sans-serif; font-size: 18px; max-width: 520px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 1.5rem; }
+    input, button { display: block; box-sizing: border-box; width: 100%; height: 56px; font-size: 1rem;
+                    border-radius: 10px; margin-top: 8px; }
+    input { padding: 0 12px; border: 1px solid #ccc; font-family: ui-monospace, monospace; }
+    #course { font-size: 1.6rem; font-weight: bold; }
+    #message { margin: 16px 0; }
+    .error { color: #b00020; }
+    footer { margin-top: 32px; font-size: 0.8rem; color: #777; }
+  </style>
+</head>
+<body>
+  <h1>My result</h1>
+
+  <form id="lookup">
+    <label for="session">Your session id</label>
+    <input id="session" required autocomplete="off" spellcheck="false" placeholder="e.g. feac7460a0df4c19…">
+    <button type="submit">See my course</button>
+  </form>
+
+  <p id="message"></p>
+  <div id="result" hidden>
+    <p>You are assigned to:</p>
+    <p id="course"></p>
+  </div>
+
+  <footer id="version"></footer>
+
+  <script src="config.js"></script>
+  <script>
+    const message = document.getElementById("message");
+    const input = document.getElementById("session");
+    const result = document.getElementById("result");
+
+    function show(text, isError = false) {
+      message.textContent = text;
+      message.className = isError ? "error" : "";
+    }
+
+    // the link shown after submitting carries the session id: result.html?session=...
+    input.value = new URLSearchParams(location.search).get("session") || "";
+
+    document.getElementById("lookup").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      result.hidden = true;
+      show("Loading…");
+      try {
+        const res = await fetch(`${API_URL}/session/assignment/${encodeURIComponent(input.value.trim())}`);
+        document.getElementById("version").textContent = "Version " + (res.headers.get("X-App-Version") || "?");
+        const data = await res.json();
+        if (!res.ok) return show(data.detail || "Request failed.", true);
+        document.getElementById("course").textContent = data.course;
+        result.hidden = false;
+        show("");
+      } catch {
+        show("The server cannot be reached.", true);
+      }
+    });
+  </script>
+</body>
+</html>

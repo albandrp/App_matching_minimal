@@ -18,6 +18,9 @@
     pre { background: #f4f4f4; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; }
     #message { margin: 16px 0; }
     .error { color: #b00020; }
+    .files { display: grid; gap: 8px; margin: 16px 0; }
+    .files input[type=file] { height: auto; padding: 8px 0; border: none; }
+    .error { white-space: pre-line; }
     footer { margin-top: 32px; font-size: 0.8rem; color: #777; }
   </style>
 </head>
@@ -28,6 +31,13 @@
     <input type="password" id="password" placeholder="Admin password" autocomplete="current-password" required>
     <button type="submit">Refresh</button>
   </form>
+
+  <div class="files">
+    <button type="button" id="download">Download user entries</button>
+    <label for="assignments">Assignments file (CSV: session_id,course)</label>
+    <input type="file" id="assignments" accept=".csv,text/csv">
+    <button type="button" id="upload">Upload assignments</button>
+  </div>
 
   <p id="message"></p>
   <div id="stats" hidden>
@@ -61,6 +71,54 @@
         .join("");
     }
 
+    // FastAPI puts a string in `detail`, a list of messages (our CSV checks),
+    // or a list of {msg, ...} (Pydantic validation)
+    function errorText(detail, fallback) {
+      if (!Array.isArray(detail)) return detail || fallback;
+      return detail.map(d => typeof d === "string" ? d : d.msg).join("\n");
+    }
+
+    function password() {
+      const value = document.getElementById("password").value;
+      if (!value) show("Type the admin password first.", true);
+      return value;
+    }
+
+    document.getElementById("download").onclick = async () => {
+      if (!password()) return;
+      try {
+        const res = await fetch(`${API_URL}/server/export`, { headers: { "X-Admin-Password": password() } });
+        if (!res.ok) return show(errorText((await res.json()).detail, "Download failed."), true);
+        // turn the response into a file download
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(await res.blob());
+        link.download = "submissions.jsonl";
+        link.click();
+        URL.revokeObjectURL(link.href);
+        show("Downloaded submissions.jsonl");
+      } catch {
+        show("The server cannot be reached.", true);
+      }
+    };
+
+    document.getElementById("upload").onclick = async () => {
+      if (!password()) return;
+      const file = document.getElementById("assignments").files[0];
+      if (!file) return show("Choose a CSV file first.", true);
+      try {
+        const res = await fetch(`${API_URL}/server/assignments`, {
+          method: "POST",
+          headers: { "X-Admin-Password": password(), "Content-Type": "text/csv" },
+          body: file,
+        });
+        const data = await res.json();
+        if (!res.ok) return show("File refused:\n" + errorText(data.detail, "Upload failed."), true);
+        show(`Assignments uploaded for ${data.assigned} sessions.`);
+      } catch {
+        show("The server cannot be reached.", true);
+      }
+    };
+
     // the password only lives in the input field, it is sent in a header on each refresh
     document.getElementById("login").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -73,13 +131,14 @@
         const data = await res.json();
         if (!res.ok) {
           document.getElementById("stats").hidden = true;
-          return show(data.detail || "Request failed.", true);
+          return show(errorText(data.detail, "Request failed."), true);
         }
         rows("summary", [
           ["Panel", data.active ? "active" : "inactive"],
           ["Sessions started", data.total_sessions],
           ["Submissions", data.total_submissions],
           ["Kept the initial order", data.kept_initial_order],
+          ["Assignments uploaded", data.assignments_uploaded ? "yes" : "no"],
         ]);
         rows("labels", Object.keys(data.average_rank_by_label).map(label => [
           label, data.average_rank_by_label[label].toFixed(2), data.ranked_first_count[label],
