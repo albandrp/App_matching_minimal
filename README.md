@@ -41,21 +41,25 @@ number between 1 and 1000 per user) and the labels with their "% available
 seats", sorted by ascending seats. The user can only reorder them with ↑/↓.
 Submitting asks for confirmation first, then shows the session id with a Copy
 button and a link to the result page: participants need that id to see their
-course. The footer shows the session id and the app version.
+matches. The footer shows the session id and the app version.
 
 **Result page.** The participant types their session id (pre-filled when
-coming from the link) and gets the course they are assigned, once the admin
-has uploaded the assignments. Works even after the panel is closed.
+coming from the link) and gets the course they are matched to under each of
+the two algorithms ("Match under DA", "Match under IA"), once the admin has
+uploaded the assignments. Works even after the panel is closed.
 
 **Admin page.** Type the admin password, then:
 
 - **Refresh** shows the panel state, the counts, per-label stats and the raw
   statistics payload;
-- **Download user entries** downloads `submissions.jsonl`;
-- **Upload assignments** sends a CSV with two columns, session id and
-  assigned course (header `session_id,course` optional). The whole file is
-  refused, with the list of problems, if a session id is unknown or repeated
-  or a course isn't a label. A new upload replaces the previous one.
+- **Download user entries** downloads `submissions.csv`: one row per
+  submission, `session_id, submitted_at, points, rank_1 … rank_5`
+  (`rank_1` = most preferred label);
+- **Upload assignments** sends a CSV with three columns: session id, course
+  matched under DA, course matched under IA (header `session_id,da,ia`
+  optional). The whole file is refused, with the list of problems, if a
+  session id is unknown or repeated or a course isn't a label. A new upload
+  replaces the previous one.
   Upload it **before** any reset: a reset archives the sessions, so their
   ids would then be refused as unknown.
 
@@ -76,16 +80,17 @@ curl -X POST localhost:8000/server/activate -H "X-Root-Password: change-me-root"
 
 curl -X POST localhost:8000/session/start
 # => {"session_id": "...", "points": 547,
-#     "items": [{"label": "AI", "seats": 8}, {"label": "GameTheory", "seats": 23}, ...]}
+#     "items": [{"label": "Artificial intelligence", "seats": 8},
+#               {"label": "Cryptography", "seats": 23}, ...]}
 
 # send the same items back, in your order (most preferred first)
 curl -X POST localhost:8000/session/submit -H "Content-Type: application/json" \
   -d '{"session_id": "<session_id>", "items": [<the items above, reordered>]}'
 
 curl localhost:8000/server/statistics -H "X-Admin-Password: change-me-admin"
-curl localhost:8000/server/export -H "X-Admin-Password: change-me-admin"
+curl localhost:8000/server/export -H "X-Admin-Password: change-me-admin"   # CSV
 
-# assignments: CSV "session_id,course", then each participant looks theirs up
+# assignments: CSV "session_id,da,ia", then each participant looks theirs up
 curl -X POST localhost:8000/server/assignments -H "X-Admin-Password: change-me-admin" \
   -H "Content-Type: text/csv" --data-binary @assignments.csv
 curl localhost:8000/session/assignment/<session_id>

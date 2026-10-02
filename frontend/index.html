@@ -54,7 +54,6 @@
     const list = document.getElementById("items");
     let sessionId, items = [];
 
-    // FastAPI puts a string in `detail`, or a list of {msg, ...} for validation errors
     async function errorText(res, fallback) {
       const { detail } = await res.json();
       return Array.isArray(detail) ? detail.map(d => d.msg).join("; ") : detail || fallback;
@@ -65,7 +64,6 @@
       message.className = isError ? "error" : "";
     }
 
-    // every API response carries the app version in a header
     function showVersion(res) {
       document.getElementById("version").textContent = "Version " + (res.headers.get("X-App-Version") || "?");
     }
@@ -93,15 +91,13 @@
 
     async function init() {
       try {
-        // No status route in the spec: session/start itself is how you find
-        // out whether the panel is active (it 403s while inactive).
         const res = await fetch(`${API_URL}/session/start`, { method: "POST" });
         showVersion(res);
         if (res.status === 403) return show("The panel is not active at the moment.");
         if (!res.ok) return show(await errorText(res, "Could not start a session."), true);
         const session = await res.json();
         sessionId = session.session_id;
-        items = session.items; // already sorted by ascending seats
+        items = session.items;
         document.getElementById("points").textContent = `You have ${session.points} points`;
         document.getElementById("session").textContent = "Session " + sessionId;
         render();

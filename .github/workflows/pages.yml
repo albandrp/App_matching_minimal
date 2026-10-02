@@ -1,4 +1,3 @@
-# Publish frontend/ to GitHub Pages on every push to main
 name: Deploy frontend to GitHub Pages
 
 on:
@@ -24,7 +23,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      # the API address comes from a repository variable, not from the code
       - name: Write API address into config.js
         env:
           API_URL: ${{ vars.API_URL }}

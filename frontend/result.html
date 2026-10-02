@@ -11,7 +11,8 @@
     input, button { display: block; box-sizing: border-box; width: 100%; height: 56px; font-size: 1rem;
                     border-radius: 10px; margin-top: 8px; }
     input { padding: 0 12px; border: 1px solid #ccc; font-family: ui-monospace, monospace; }
-    #course { font-size: 1.6rem; font-weight: bold; }
+    #result p { margin: 12px 0; }
+    #result strong { font-size: 1.4rem; }
     #message { margin: 16px 0; }
     .error { color: #b00020; }
     footer { margin-top: 32px; font-size: 0.8rem; color: #777; }
@@ -21,15 +22,15 @@
   <h1>My result</h1>
 
   <form id="lookup">
-    <label for="session">Your session id</label>
+    <label for="session">Type your session id</label>
     <input id="session" required autocomplete="off" spellcheck="false" placeholder="e.g. feac7460a0df4c19…">
-    <button type="submit">See my course</button>
+    <button type="submit">See my matches</button>
   </form>
 
   <p id="message"></p>
   <div id="result" hidden>
-    <p>You are assigned to:</p>
-    <p id="course"></p>
+    <p>Match under DA: <strong id="da"></strong></p>
+    <p>Match under IA: <strong id="ia"></strong></p>
   </div>
 
   <footer id="version"></footer>
@@ -45,7 +46,6 @@
       message.className = isError ? "error" : "";
     }
 
-    // the link shown after submitting carries the session id: result.html?session=...
     input.value = new URLSearchParams(location.search).get("session") || "";
 
     document.getElementById("lookup").addEventListener("submit", async (event) => {
@@ -57,7 +57,8 @@
         document.getElementById("version").textContent = "Version " + (res.headers.get("X-App-Version") || "?");
         const data = await res.json();
         if (!res.ok) return show(data.detail || "Request failed.", true);
-        document.getElementById("course").textContent = data.course;
+        document.getElementById("da").textContent = data.da;
+        document.getElementById("ia").textContent = data.ia;
         result.hidden = false;
         show("");
       } catch {
