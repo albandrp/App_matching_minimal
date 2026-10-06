@@ -11,10 +11,12 @@
     ol { padding: 0; list-style: none; }
     .item { display: grid; grid-template-columns: 28px 1fr 44px; gap: 10px; align-items: center;
             padding: 10px; margin: 8px 0; border: 1px solid #ccc; border-radius: 10px; }
-    .item > b { font-size: 1.2rem; text-align: center; }
-    .item .label { display: block; font-weight: 600; margin-bottom: 4px; }
-    .item .fact { display: block; font-size: 1rem; line-height: 1.5; }
-    .item .fact strong { font-size: 1.3rem; }
+    .item > b { font-size: 1.2rem; text-align: center; color: #888; }
+    .item .label { display: block; font-weight: 600; margin-bottom: 6px; }
+    .item .facts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .item .fact { padding: 4px 10px; border-radius: 8px; font-size: 0.95rem; background: #eef1f5; color: #222; }
+    .item .fact strong { font-size: 1.25rem; }
+    .item .fact.seats { background: #ffd43b; }
     .item .arrows { display: flex; flex-direction: column; gap: 6px; }
     .item button { height: 40px; font-size: 1.1rem; border-radius: 8px; padding: 0; }
     #submit, #copy, #done a { display: block; box-sizing: border-box; width: 100%; height: 60px; font-size: 1.2rem;
@@ -81,8 +83,8 @@
         li.className = "item";
         li.innerHTML = `<b>${i + 1}</b>`
           + `<div><span class="label">${item.label}</span>`
-          + `<span class="fact"><strong>${item.seats}%</strong> available seats</span>`
-          + `<span class="fact">you have <strong>${item.points}</strong> points</span></div>`
+          + `<div class="facts"><span class="fact seats"><strong>${item.seats}%</strong> available seats</span>`
+          + `<span class="fact">you have <strong>${item.points}</strong> points</span></div></div>`
           + `<div class="arrows"><button type="button" aria-label="Move up">↑</button>`
           + `<button type="button" aria-label="Move down">↓</button></div>`;
         const [up, down] = li.querySelectorAll("button");
