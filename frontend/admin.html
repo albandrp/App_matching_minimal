@@ -23,6 +23,7 @@
     .files { display: grid; gap: 8px; margin: 16px 0; }
     .files input[type=file] { height: auto; padding: 8px 0; border: none; }
     .error { white-space: pre-line; }
+    #reset { margin-top: 16px; background: #b00020; color: #fff; border: none; }
     footer { margin-top: 32px; font-size: 0.8rem; color: #777; }
   </style>
 </head>
@@ -39,6 +40,7 @@
     <label for="assignments">Assignments file (CSV: session_id,da,ia)</label>
     <input type="file" id="assignments" accept=".csv,text/csv">
     <button type="button" id="upload">Upload assignments</button>
+    <button type="button" id="reset">Reset all answers</button>
   </div>
 
   <p id="message"></p>
@@ -119,8 +121,30 @@
       }
     };
 
-    document.getElementById("login").addEventListener("submit", async (event) => {
+    document.getElementById("reset").onclick = async () => {
+      if (!password()) return;
+      if (!confirm("This will remove all answers, sessions and assignments.\n"
+        + "They are moved to an archive on the server, not deleted.\n\nReset everything?")) return;
+      try {
+        const res = await fetch(`${API_URL}/server/reset`, {
+          method: "POST",
+          headers: { "X-Admin-Password": password() },
+        });
+        const data = await res.json();
+        if (!res.ok) return show(errorText(data.detail, "Reset failed."), true);
+        await refresh();
+        show("All answers, sessions and assignments have been reset (archived on the server).");
+      } catch {
+        show("The server cannot be reached.", true);
+      }
+    };
+
+    document.getElementById("login").addEventListener("submit", (event) => {
       event.preventDefault();
+      refresh();
+    });
+
+    async function refresh() {
       show("Loading…");
       try {
         const res = await fetch(`${API_URL}/server/statistics`, {
@@ -150,7 +174,7 @@
       } catch {
         show("The server cannot be reached.", true);
       }
-    });
+    }
   </script>
 </body>
 </html>

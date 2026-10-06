@@ -27,19 +27,24 @@ if not ADMIN_PASSWORD or not ROOT_PASSWORD:
 APP_VERSION = tomllib.loads(Path(__file__).with_name("pyproject.toml").read_text())["project"]["version"]
 
 
+POINTS_RANGE = (1, 1000)
+ID_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O, 1/I/L
+ID_LENGTH = 8
+
+
 class Item(BaseModel):
     label: str
     seats: Annotated[int, Field(ge=0, le=100)]  # % of available seats
+    points: Annotated[int, Field(ge=POINTS_RANGE[0], le=POINTS_RANGE[1])]
 
 
 LABELS_FILE = Path(os.environ.get("LABELS_FILE", Path(__file__).with_name("labels.json")))
-ITEMS = [Item(label=label, seats=seats) for label, seats in json.loads(LABELS_FILE.read_text())]
-LABELS = [item.label for item in ITEMS]
-SEATS = {item.label: item.seats for item in ITEMS}
-if len(set(LABELS)) != len(LABELS) or sum(SEATS.values()) != 100:
+LABEL_PAIRS = json.loads(LABELS_FILE.read_text())
+SEATS = {label: seats for label, seats in LABEL_PAIRS}
+LABELS = list(SEATS)
+if len(LABELS) != len(LABEL_PAIRS) or sum(SEATS.values()) != 100:
     raise RuntimeError(f"{LABELS_FILE}: labels must be unique and seats must sum to 100")
-INITIAL_ORDER = [item.label for item in sorted(ITEMS, key=lambda item: item.seats)]
-POINTS_RANGE = (1, 1000)
+INITIAL_ORDER = sorted(LABELS, key=lambda label: SEATS[label])
 
 
 class Submission(BaseModel):
@@ -98,6 +103,17 @@ def write_json(path: Path, payload) -> None:
 
 
 _lock = threading.Lock()
+
+
+def new_session_id(taken) -> str:
+    while True:
+        session_id = "".join(secrets.choice(ID_ALPHABET) for _ in range(ID_LENGTH))
+        if session_id not in taken:
+            return session_id
+
+
+def normalize_id(session_id: str) -> str:
+    return session_id.strip().upper()
 
 
 def is_active() -> bool:
@@ -202,9 +218,18 @@ def export() -> Response:
     submissions = [json.loads(line) for line in DATA_FILE.read_text().splitlines() if line.strip()]
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["session_id", "submitted_at", "points", *(f"rank_{i}" for i in range(1, len(LABELS) + 1))])
+    writer.writerow([
+        "session_id", "submitted_at",
+        *(f"rank_{i}" for i in range(1, len(LABELS) + 1)),
+        *(f"{label} points" for label in LABELS),
+    ])
     for r in submissions:
-        writer.writerow([r["session_id"], r["submitted_at"], r["points"], *(item["label"] for item in r["items"])])
+        points = {item["label"]: item["points"] for item in r["items"]}
+        writer.writerow([
+            r["session_id"], r["submitted_at"],
+            *(item["label"] for item in r["items"]),
+            *(points[label] for label in LABELS),
+        ])
     return Response(
         out.getvalue(),
         media_type="text/csv",
@@ -233,6 +258,7 @@ async def upload_assignments(request: Request) -> dict:
             errors.append(f"row {line}: expected {len(columns)} columns ({', '.join(columns)}), got {len(row)}")
             continue
         session_id, *courses = (cell.strip() for cell in row)
+        session_id = normalize_id(session_id)
         if session_id not in sessions:
             errors.append(f"row {line}: unknown session id {session_id!r}")
         elif session_id in assignments:
@@ -253,24 +279,22 @@ async def upload_assignments(request: Request) -> dict:
 
 @app.post("/session/start", dependencies=[Depends(rate_limit("session")), Depends(require_active)])
 def start() -> dict:
-    session_id = uuid.uuid4().hex
-    points = random.randint(*POINTS_RANGE)
+    points = {label: random.randint(*POINTS_RANGE) for label in LABELS}
     with _lock:
         sessions = read_json(SESSIONS_FILE)
+        session_id = new_session_id(sessions)
         sessions[session_id] = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "used": False,
             "points": points,
         }
         write_json(SESSIONS_FILE, sessions)
-    items = [{"label": label, "seats": SEATS[label]} for label in INITIAL_ORDER]
-    return {"session_id": session_id, "points": points, "items": items}
+    items = [{"label": label, "seats": SEATS[label], "points": points[label]} for label in INITIAL_ORDER]
+    return {"session_id": session_id, "items": items}
 
 
 @app.post("/session/submit", dependencies=[Depends(rate_limit("session")), Depends(require_active)])
 def submit(payload: Submission) -> dict:
-    if {item.label: item.seats for item in payload.items} != SEATS:
-        raise HTTPException(422, "items must be the configured labels and seats, only reordered")
     with _lock:
         sessions = read_json(SESSIONS_FILE)
         session = sessions.get(payload.session_id)
@@ -278,11 +302,13 @@ def submit(payload: Submission) -> dict:
             raise HTTPException(401, "Unknown session")
         if session["used"]:
             raise HTTPException(409, "Session already submitted")
+        expected = {label: (SEATS[label], session["points"][label]) for label in LABELS}
+        if {item.label: (item.seats, item.points) for item in payload.items} != expected:
+            raise HTTPException(422, "items must be the session's items, only reordered")
         record = {
             "id": uuid.uuid4().hex,
             "submitted_at": datetime.now(timezone.utc).isoformat(),
             "session_id": payload.session_id,
-            "points": session["points"],
             "items": [item.model_dump() for item in payload.items],
         }
         with DATA_FILE.open("a") as f:
@@ -296,6 +322,7 @@ def submit(payload: Submission) -> dict:
 def assignment(session_id: str) -> dict:
     if not ASSIGNMENTS_FILE.exists():
         raise HTTPException(404, "Results are not available yet")
+    session_id = normalize_id(session_id)
     matches = read_json(ASSIGNMENTS_FILE).get(session_id)
     if matches is None:
         raise HTTPException(404, "No course is assigned to this session id")

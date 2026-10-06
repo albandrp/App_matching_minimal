@@ -36,12 +36,15 @@ file can be given with `LABELS_FILE`).
 
 **Participant page** (built for phones: large buttons). It calls
 `/session/start` directly - a 403 means the panel is inactive (there's no
-dedicated status route). Otherwise it shows "You have N points" (one random
-number between 1 and 1000 per user) and the labels with their "% available
-seats", sorted by ascending seats. The user can only reorder them with ↑/↓.
+dedicated status route). Otherwise it shows each label with "23% available
+seats, you have N points": the points are a random number between 1 and
+1000, drawn per user and per label. Labels are sorted by ascending seats.
+The user can only reorder them with ↑/↓.
 Submitting asks for confirmation first, then shows the session id with a Copy
 button and a link to the result page: participants need that id to see their
 matches. The footer shows the session id and the app version.
+Session ids are 8 characters, capital letters and digits without look-alikes
+(no 0/O, 1/I/L), e.g. `K7QXM3PA`; lowercase is accepted when looking up a result.
 
 **Result page.** The participant types their session id (pre-filled when
 coming from the link) and gets the course they are matched to under each of
@@ -53,8 +56,8 @@ uploaded the assignments. Works even after the panel is closed.
 - **Refresh** shows the panel state, the counts, per-label stats and the raw
   statistics payload;
 - **Download user entries** downloads `submissions.csv`: one row per
-  submission, `session_id, submitted_at, points, rank_1 … rank_5`
-  (`rank_1` = most preferred label);
+  submission, `session_id, submitted_at, rank_1 … rank_5` (`rank_1` = most
+  preferred label), then one `<label> points` column per label;
 - **Upload assignments** sends a CSV with three columns: session id, course
   matched under DA, course matched under IA (header `session_id,da,ia`
   optional). The whole file is refused, with the list of problems, if a
@@ -62,6 +65,10 @@ uploaded the assignments. Works even after the panel is closed.
   replaces the previous one.
   Upload it **before** any reset: a reset archives the sessions, so their
   ids would then be refused as unknown.
+- **Reset all answers** (after a confirmation) empties the answers, sessions
+  and assignments. Nothing is deleted: they are moved to
+  `data/archive/<timestamp>/` on the server. To delete them for good, remove
+  that folder by hand.
 
 The password stays in the input field, never in the URL. Admin routes allow
 10 requests a minute, so going faster gets a 429.
@@ -79,9 +86,9 @@ curl -X POST localhost:8000/session/start
 curl -X POST localhost:8000/server/activate -H "X-Root-Password: change-me-root"
 
 curl -X POST localhost:8000/session/start
-# => {"session_id": "...", "points": 547,
-#     "items": [{"label": "Artificial intelligence", "seats": 8},
-#               {"label": "Cryptography", "seats": 23}, ...]}
+# => {"session_id": "...",
+#     "items": [{"label": "Artificial intelligence", "seats": 8, "points": 547},
+#               {"label": "Cryptography", "seats": 23, "points": 112}, ...]}
 
 # send the same items back, in your order (most preferred first)
 curl -X POST localhost:8000/session/submit -H "Content-Type: application/json" \
@@ -112,10 +119,10 @@ curl -X POST localhost:8000/server/reset -H "X-Admin-Password: change-me-admin"
 | `/session/assignment/{session_id}` | GET | none (the session id itself) |
 
 Submission rules (Pydantic models `Item` and `Submission`): the body is
-`{"session_id": ..., "items": [{"label": ..., "seats": ...}, ...]}`. The items
-must be exactly the labels and seats from `labels.json`, only reordered. The
-position in the list is the preference order, first = most preferred. The
-stored record adds the session's `points`, taken from the server.
+`{"session_id": ..., "items": [{"label": ..., "seats": ..., "points": ...}, ...]}`.
+The items must be exactly the ones the session was given (seats from
+`labels.json`, points drawn for that session), only reordered. The position
+in the list is the preference order, first = most preferred.
 
 `/server/statistics` reports, per label, the average rank (1 = most
 preferred) and how often it was ranked first, how many users submitted the
