@@ -1,7 +1,7 @@
 # app-matching-minimal
 
 Single-file, minimal-dependency implementation of the app-matching API spec:
-admin/root-protected control panel + session-based submissions, jsonl/JSON
+admin-password-protected control panel + session-based submissions, jsonl/JSON
 file storage, brute-force protection. The submission payload is validated
 with a Pydantic model (bundled with FastAPI); no settings library, no
 rate-limiting library — just FastAPI and the standard library.
@@ -14,11 +14,11 @@ Docker).
 
 ```bash
 uv sync
-export ADMIN_PASSWORD=change-me-admin ROOT_PASSWORD=change-me-root
+export ADMIN_PASSWORD=change-me-admin
 uv run uvicorn minimal_app:app --reload
 ```
 
-Both passwords are required: the app refuses to start without them.
+The admin password is required: the app refuses to start without it.
 
 Frontend (separate static pages; they find the API through
 [frontend/config.js](frontend/config.js), set to `localhost:8000`):
@@ -49,10 +49,13 @@ Session ids are 8 characters, capital letters and digits without look-alikes
 **Result page.** The participant types their session id (pre-filled when
 coming from the link) and gets the course they are matched to under each of
 the two algorithms ("Match under DA", "Match under IA"), once the admin has
-uploaded the assignments. Works even after the panel is closed.
+uploaded the assignments. It also shows the ranking they submitted, with each
+label's seats and points. Works even after the panel is closed.
 
 **Admin page.** Type the admin password, then:
 
+- **Open / Close the participant page** (one button at the top, its label
+  follows the current state). Closing it doesn't affect the result page;
 - **Refresh** shows the panel state, the counts, per-label stats and the raw
   statistics payload;
 - **Download user entries** downloads `submissions.csv`: one row per
@@ -83,7 +86,7 @@ show it in their footer.
 # no status route: session/start itself is how you find out (403 while inactive)
 curl -X POST localhost:8000/session/start
 
-curl -X POST localhost:8000/server/activate -H "X-Root-Password: change-me-root"
+curl -X POST localhost:8000/server/activate -H "X-Admin-Password: change-me-admin"
 
 curl -X POST localhost:8000/session/start
 # => {"session_id": "...",
@@ -108,15 +111,15 @@ curl -X POST localhost:8000/server/reset -H "X-Admin-Password: change-me-admin"
 
 | Route | Method | Auth |
 |---|---|---|
-| `/server/activate` | POST | `X-Root-Password` |
-| `/server/deactivate` | POST | `X-Root-Password` |
+| `/server/activate` | POST | `X-Admin-Password` |
+| `/server/deactivate` | POST | `X-Admin-Password` |
 | `/server/reset` | POST | `X-Admin-Password` |
 | `/server/statistics` | GET | `X-Admin-Password` |
 | `/server/export` | GET | `X-Admin-Password` |
 | `/server/assignments` | POST | `X-Admin-Password` (body: the CSV file) |
 | `/session/start` | POST | none (403 if the panel is inactive) |
 | `/session/submit` | POST | valid, unused `session_id` in the body |
-| `/session/assignment/{session_id}` | GET | none (the session id itself) |
+| `/session/assignment/{session_id}` | GET | none (the session id itself): the submitted ranking and the DA/IA matches |
 
 Submission rules (Pydantic models `Item` and `Submission`): the body is
 `{"session_id": ..., "items": [{"label": ..., "seats": ..., "points": ...}, ...]}`.

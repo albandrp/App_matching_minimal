@@ -21,9 +21,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
-ROOT_PASSWORD = os.environ.get("ROOT_PASSWORD")
-if not ADMIN_PASSWORD or not ROOT_PASSWORD:
-    raise RuntimeError("ADMIN_PASSWORD and ROOT_PASSWORD must be set")
+if not ADMIN_PASSWORD:
+    raise RuntimeError("ADMIN_PASSWORD must be set")
 APP_VERSION = tomllib.loads(Path(__file__).with_name("pyproject.toml").read_text())["project"]["version"]
 
 
@@ -116,6 +115,10 @@ def normalize_id(session_id: str) -> str:
     return session_id.strip().upper()
 
 
+def read_submissions() -> list[dict]:
+    return [json.loads(line) for line in DATA_FILE.read_text().splitlines() if line.strip()]
+
+
 def is_active() -> bool:
     return read_json(STATE_FILE)["active"]
 
@@ -147,11 +150,6 @@ def require_admin(x_admin_password: str = Header(...)) -> None:
         raise HTTPException(401, "Invalid admin password")
 
 
-def require_root(x_root_password: str = Header(...)) -> None:
-    if not secrets.compare_digest(x_root_password, ROOT_PASSWORD):
-        raise HTTPException(401, "Invalid root password")
-
-
 def require_active() -> None:
     if not is_active():
         raise HTTPException(403, "Server is not active")
@@ -159,13 +157,13 @@ def require_active() -> None:
 
 # server
 
-@app.post("/server/activate", dependencies=[Depends(rate_limit("admin")), Depends(require_root)])
+@app.post("/server/activate", dependencies=[Depends(rate_limit("admin")), Depends(require_admin)])
 def activate() -> dict:
     write_json(STATE_FILE, {"active": True})
     return {"active": True}
 
 
-@app.post("/server/deactivate", dependencies=[Depends(rate_limit("admin")), Depends(require_root)])
+@app.post("/server/deactivate", dependencies=[Depends(rate_limit("admin")), Depends(require_admin)])
 def deactivate() -> dict:
     write_json(STATE_FILE, {"active": False})
     return {"active": False}
@@ -192,7 +190,7 @@ def reset() -> dict:
 
 @app.get("/server/statistics", dependencies=[Depends(rate_limit("admin")), Depends(require_admin)])
 def statistics() -> dict:
-    submissions = [json.loads(line) for line in DATA_FILE.read_text().splitlines() if line.strip()]
+    submissions = read_submissions()
     sessions = read_json(SESSIONS_FILE)
     orders = [[item["label"] for item in r["items"]] for r in submissions]
     n = len(submissions) or 1
@@ -215,7 +213,7 @@ def statistics() -> dict:
 
 @app.get("/server/export", dependencies=[Depends(rate_limit("admin")), Depends(require_admin)])
 def export() -> Response:
-    submissions = [json.loads(line) for line in DATA_FILE.read_text().splitlines() if line.strip()]
+    submissions = read_submissions()
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow([
@@ -320,10 +318,15 @@ def submit(payload: Submission) -> dict:
 
 @app.get("/session/assignment/{session_id}", dependencies=[Depends(rate_limit("session"))])
 def assignment(session_id: str) -> dict:
-    if not ASSIGNMENTS_FILE.exists():
-        raise HTTPException(404, "Results are not available yet")
     session_id = normalize_id(session_id)
-    matches = read_json(ASSIGNMENTS_FILE).get(session_id)
-    if matches is None:
-        raise HTTPException(404, "No course is assigned to this session id")
-    return {"session_id": session_id, **matches}
+    submission = next((r for r in read_submissions() if r["session_id"] == session_id), None)
+    available = ASSIGNMENTS_FILE.exists()
+    matches = read_json(ASSIGNMENTS_FILE).get(session_id) if available else None
+    if submission is None and matches is None:
+        raise HTTPException(404, "No submission found for this session id")
+    return {
+        "session_id": session_id,
+        "items": submission["items"] if submission else None,
+        "results_available": available,
+        "matches": matches,
+    }

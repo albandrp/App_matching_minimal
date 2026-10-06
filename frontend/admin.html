@@ -8,22 +8,30 @@
   <style>
     body { font-family: system-ui, sans-serif; font-size: 18px; max-width: 640px; margin: 0 auto; padding: 16px; }
     h1 { font-size: 1.5rem; }
-    h2 { font-size: 1.2rem; margin: 24px 0 0; }
+    h2 { font-size: 1.2rem; margin: 0 0 12px; }
     form { display: flex; gap: 8px; }
     input, button { height: 48px; font-size: 1rem; border-radius: 8px; }
     input { flex: 1; min-width: 0; padding: 0 12px; border: 1px solid #ccc; }
     button { padding: 0 20px; }
-    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    table { width: 100%; border-collapse: collapse; margin: 0 0 16px; }
     th, td { text-align: left; padding: 8px; border-bottom: 1px solid #ddd; }
     td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
     pre { background: #f4f4f4; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; }
     #message { margin: 16px 0; }
-    .error { color: #b00020; }
+    .error { color: #b00020; white-space: pre-line; }
     [hidden] { display: none !important; }
-    .files { display: grid; gap: 8px; margin: 16px 0; }
-    .files input[type=file] { height: auto; padding: 8px 0; border: none; }
-    .error { white-space: pre-line; }
-    #reset { margin-top: 16px; background: #b00020; color: #fff; border: none; }
+    section { margin: 24px 0; padding: 16px; border: 1px solid #ccc; border-radius: 12px; }
+    #panel { border: 2px solid #1c7ed6; background: #e7f5ff; }
+    #panel p { margin: 0 0 12px; }
+    #toggle { width: 100%; height: 56px; font-size: 1.1rem; font-weight: 600; color: #fff; background: #1c7ed6; border: none; }
+    .state { padding: 2px 10px; border-radius: 8px; color: #fff; }
+    .state.on { background: #2b8a3e; }
+    .state.off { background: #b00020; }
+    #files { display: grid; gap: 8px; }
+    #files input[type=file] { height: auto; padding: 8px 0; border: none; }
+    #files label { margin-top: 16px; }
+    #danger { margin-top: 48px; border-color: #b00020; }
+    #reset { width: 100%; background: #b00020; color: #fff; border: none; }
     footer { margin-top: 32px; font-size: 0.8rem; color: #777; }
   </style>
 </head>
@@ -35,28 +43,42 @@
     <button type="submit">Refresh</button>
   </form>
 
-  <div class="files" id="files" hidden>
-    <button type="button" id="download">Download user entries</button>
-    <label for="assignments">Assignments file (CSV: session_id,da,ia)</label>
-    <input type="file" id="assignments" accept=".csv,text/csv">
-    <button type="button" id="upload">Upload assignments</button>
-    <button type="button" id="reset">Reset all answers</button>
-  </div>
-
   <p id="message"></p>
-  <div id="stats" hidden>
-    <h2>Statistics</h2>
-    <table>
-      <tbody id="summary"></tbody>
-    </table>
-    <table>
-      <thead><tr><th>Label</th><th class="num">Average rank</th><th class="num">Ranked first</th></tr></thead>
-      <tbody id="labels"></tbody>
-    </table>
-    <details>
-      <summary>Raw payload</summary>
-      <pre id="raw"></pre>
-    </details>
+
+  <div id="admin" hidden>
+    <section id="panel">
+      <p>Participant page: <strong class="state" id="panel-state"></strong></p>
+      <button type="button" id="toggle"></button>
+    </section>
+
+    <section id="files">
+      <h2>Files</h2>
+      <button type="button" id="download">Download user entries</button>
+      <label for="assignments">Assignments file (CSV: session_id,da,ia)</label>
+      <input type="file" id="assignments" accept=".csv,text/csv">
+      <button type="button" id="upload">Upload assignments</button>
+    </section>
+
+    <section>
+      <h2>Statistics</h2>
+      <table>
+        <tbody id="summary"></tbody>
+      </table>
+      <table>
+        <thead><tr><th>Label</th><th class="num">Average rank</th><th class="num">Ranked first</th></tr></thead>
+        <tbody id="labels"></tbody>
+      </table>
+      <details>
+        <summary>Raw payload</summary>
+        <pre id="raw"></pre>
+      </details>
+    </section>
+
+    <section id="danger">
+      <h2>Reset</h2>
+      <p>Removes all answers, sessions and assignments (they are archived on the server).</p>
+      <button type="button" id="reset">Reset all answers</button>
+    </section>
   </div>
 
   <footer id="version"></footer>
@@ -64,6 +86,7 @@
   <script src="config.js"></script>
   <script>
     const message = document.getElementById("message");
+    let active = false;
 
     function show(text, isError = false) {
       message.textContent = text;
@@ -86,6 +109,24 @@
       if (!value) show("Type the admin password first.", true);
       return value;
     }
+
+    document.getElementById("toggle").onclick = async () => {
+      if (!password()) return;
+      if (active && !confirm("Close the participant page?\n"
+        + "Participants won't be able to answer anymore. The result page keeps working.")) return;
+      try {
+        const res = await fetch(`${API_URL}/server/${active ? "deactivate" : "activate"}`, {
+          method: "POST",
+          headers: { "X-Admin-Password": password() },
+        });
+        const data = await res.json();
+        if (!res.ok) return show(errorText(data.detail, "Request failed."), true);
+        await refresh();
+        show(data.active ? "The participant page is now open." : "The participant page is now closed.");
+      } catch {
+        show("The server cannot be reached.", true);
+      }
+    };
 
     document.getElementById("download").onclick = async () => {
       if (!password()) return;
@@ -115,6 +156,7 @@
         });
         const data = await res.json();
         if (!res.ok) return show("File refused:\n" + errorText(data.detail, "Upload failed."), true);
+        await refresh();
         show(`Assignments uploaded for ${data.assigned} sessions.`);
       } catch {
         show("The server cannot be reached.", true);
@@ -153,12 +195,15 @@
         document.getElementById("version").textContent = "Version " + (res.headers.get("X-App-Version") || "?");
         const data = await res.json();
         if (!res.ok) {
-          document.getElementById("stats").hidden = true;
-          document.getElementById("files").hidden = true;
+          document.getElementById("admin").hidden = true;
           return show(errorText(data.detail, "Request failed."), true);
         }
+        active = data.active;
+        const state = document.getElementById("panel-state");
+        state.textContent = active ? "open" : "closed";
+        state.className = "state " + (active ? "on" : "off");
+        document.getElementById("toggle").textContent = active ? "Close the participant page" : "Open the participant page";
         rows("summary", [
-          ["Panel", data.active ? "active" : "inactive"],
           ["Sessions started", data.total_sessions],
           ["Submissions", data.total_submissions],
           ["Kept the initial order", data.kept_initial_order],
@@ -168,8 +213,7 @@
           label, data.average_rank_by_label[label].toFixed(2), data.ranked_first_count[label],
         ]));
         document.getElementById("raw").textContent = JSON.stringify(data, null, 2);
-        document.getElementById("stats").hidden = false;
-        document.getElementById("files").hidden = false;
+        document.getElementById("admin").hidden = false;
         show("Updated at " + new Date().toLocaleTimeString());
       } catch {
         show("The server cannot be reached.", true);

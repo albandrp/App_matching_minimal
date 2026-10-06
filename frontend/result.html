@@ -11,8 +11,18 @@
     input, button { display: block; box-sizing: border-box; width: 100%; height: 56px; font-size: 1rem;
                     border-radius: 10px; margin-top: 8px; }
     input { padding: 0 12px; border: 1px solid #ccc; font-family: ui-monospace, monospace; }
-    #result p { margin: 12px 0; }
-    #result strong { font-size: 1.4rem; }
+    h2 { font-size: 1.2rem; margin: 24px 0 8px; }
+    #matches p { margin: 12px 0; }
+    #matches strong { font-size: 1.4rem; }
+    ol { padding: 0; list-style: none; margin: 0; }
+    .item { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: center;
+            padding: 10px; margin: 8px 0; border: 1px solid #ccc; border-radius: 10px; }
+    .item > b { font-size: 1.2rem; text-align: center; color: #888; }
+    .item .label { display: block; font-weight: 600; margin-bottom: 6px; }
+    .item .facts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .item .fact { padding: 4px 10px; border-radius: 8px; font-size: 0.95rem; background: #eef1f5; color: #222; }
+    .item .fact strong { font-size: 1.25rem; }
+    .item .fact.seats { background: #ffd43b; }
     #message { margin: 16px 0; }
     .error { color: #b00020; }
     footer { margin-top: 32px; font-size: 0.8rem; color: #777; }
@@ -29,8 +39,16 @@
 
   <p id="message"></p>
   <div id="result" hidden>
-    <p>Match under DA: <strong id="da"></strong></p>
-    <p>Match under IA: <strong id="ia"></strong></p>
+    <h2>Your matches</h2>
+    <div id="matches">
+      <p>Match under DA: <strong id="da"></strong></p>
+      <p>Match under IA: <strong id="ia"></strong></p>
+    </div>
+    <p id="no-matches"></p>
+    <div id="ranking">
+      <h2>Your ranking</h2>
+      <ol id="items"></ol>
+    </div>
   </div>
 
   <footer id="version"></footer>
@@ -57,8 +75,24 @@
         document.getElementById("version").textContent = "Version " + (res.headers.get("X-App-Version") || "?");
         const data = await res.json();
         if (!res.ok) return show(data.detail || "Request failed.", true);
-        document.getElementById("da").textContent = data.da;
-        document.getElementById("ia").textContent = data.ia;
+        const matches = document.getElementById("matches");
+        const noMatches = document.getElementById("no-matches");
+        matches.hidden = !data.matches;
+        noMatches.hidden = !!data.matches;
+        if (data.matches) {
+          document.getElementById("da").textContent = data.matches.da;
+          document.getElementById("ia").textContent = data.matches.ia;
+        } else {
+          noMatches.textContent = data.results_available
+            ? "No course is assigned to this session id."
+            : "Results are not available yet.";
+        }
+        document.getElementById("ranking").hidden = !data.items;
+        document.getElementById("items").innerHTML = (data.items || []).map((item, i) =>
+          `<li class="item"><b>${i + 1}</b><div><span class="label">${item.label}</span>`
+          + `<div class="facts"><span class="fact seats"><strong>${item.seats}%</strong> available seats</span>`
+          + `<span class="fact">you have <strong>${item.points}</strong> points</span></div></div></li>`
+        ).join("");
         result.hidden = false;
         show("");
       } catch {
