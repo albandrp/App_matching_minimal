@@ -30,9 +30,9 @@ python3 -m http.server 5173 -d frontend
 # admin:        http://localhost:5173/admin.html
 ```
 
-**Labels.** [labels.json](labels.json) lists `[label, % of available seats]`
+**Config.** [config.json](config.json) lists the courses as `[label, % of available seats]`
 pairs; the seats must add up to 100. The API reads it at startup (another
-file can be given with `LABELS_FILE`).
+file can be given with `CONFIG_FILE`).
 
 **Participant page** (built for phones: large buttons). It calls
 `/session/start` directly - a 403 means the panel is inactive (there's no
@@ -127,7 +127,7 @@ curl -X POST localhost:8000/server/reset -H "X-Admin-Password: change-me-admin"
 Submission rules (Pydantic models `Item` and `Submission`): the body is
 `{"session_id": ..., "items": [{"label": ..., "seats": ..., "points": ...}, ...]}`.
 The items must be exactly the ones the session was given (seats from
-`labels.json`, points drawn for that session), only reordered. The position
+`config.json`, points drawn for that session), only reordered. The position
 in the list is the preference order, first = most preferred.
 
 `/server/statistics` reports, per label, the average rank (1 = most

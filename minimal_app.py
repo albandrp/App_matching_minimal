@@ -37,12 +37,12 @@ class Item(BaseModel):
     points: Annotated[int, Field(ge=POINTS_RANGE[0], le=POINTS_RANGE[1])]
 
 
-LABELS_FILE = Path(os.environ.get("LABELS_FILE", Path(__file__).with_name("labels.json")))
-LABEL_PAIRS = json.loads(LABELS_FILE.read_text())
+CONFIG_FILE = Path(os.environ.get("CONFIG_FILE", Path(__file__).with_name("config.json")))
+LABEL_PAIRS = json.loads(CONFIG_FILE.read_text())
 SEATS = {label: seats for label, seats in LABEL_PAIRS}
 LABELS = list(SEATS)
 if len(LABELS) != len(LABEL_PAIRS) or sum(SEATS.values()) != 100:
-    raise RuntimeError(f"{LABELS_FILE}: labels must be unique and seats must sum to 100")
+    raise RuntimeError(f"{CONFIG_FILE}: labels must be unique and seats must sum to 100")
 INITIAL_ORDER = sorted(LABELS, key=lambda label: SEATS[label])
 
 
