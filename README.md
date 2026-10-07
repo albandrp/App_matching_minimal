@@ -42,7 +42,10 @@ seats, you have N points": the points are a random number between 1 and
 The user can only reorder them with ↑/↓.
 Submitting asks for confirmation first, then shows the session id with a Copy
 button and a link to the result page: participants need that id to see their
-matches. The footer shows the session id and the app version.
+matches. After submitting, the address becomes `?submitted=yes&session=<id>`,
+so refreshing shows the confirmation again instead of a new questionnaire
+(unless the answers were reset). The footer shows the session id and the app
+version.
 Session ids are 8 characters, capital letters and digits without look-alikes
 (no 0/O, 1/I/L), e.g. `K7QXM3PA`; lowercase is accepted when looking up a result.
 

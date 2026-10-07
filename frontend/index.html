@@ -96,8 +96,40 @@
       });
     }
 
+    function remember(id) {
+      history.replaceState(null, "", `?submitted=yes&session=${encodeURIComponent(id)}`);
+    }
+
+    function remembered() {
+      const params = new URLSearchParams(location.search);
+      return params.get("submitted") === "yes" ? params.get("session") : null;
+    }
+
+    function forget() {
+      history.replaceState(null, "", location.pathname);
+    }
+
+    function showDone() {
+      panel.hidden = true;
+      show("Thank you, your answers have been recorded.");
+      document.getElementById("session").textContent = "Session " + sessionId;
+      document.getElementById("done-session").textContent = sessionId;
+      document.getElementById("result-link").href = `result.html?session=${sessionId}`;
+      document.getElementById("done").hidden = false;
+    }
+
     async function init() {
       try {
+        const previous = remembered();
+        if (previous) {
+          const check = await fetch(`${API_URL}/session/assignment/${encodeURIComponent(previous)}`);
+          showVersion(check);
+          if (check.ok) {
+            sessionId = previous;
+            return showDone();
+          }
+          forget();
+        }
         const res = await fetch(`${API_URL}/session/start`, { method: "POST" });
         showVersion(res);
         if (res.status === 403) return show("The panel is not active at the moment.");
@@ -125,11 +157,8 @@
           body: JSON.stringify({ session_id: sessionId, items }),
         });
         if (!res.ok) return show(await errorText(res, "Submission failed."), true);
-        panel.hidden = true;
-        show("Thank you, your answers have been recorded.");
-        document.getElementById("done-session").textContent = sessionId;
-        document.getElementById("result-link").href = `result.html?session=${sessionId}`;
-        document.getElementById("done").hidden = false;
+        remember(sessionId);
+        showDone();
       } catch {
         show("The server cannot be reached.", true);
       }
