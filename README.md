@@ -20,20 +20,91 @@ stored as JSON/JSONL files.
 
 There are no automated tests.
 
-## Run
+## Run locally
 
-Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
+**1. Install.** Requires Python 3.12 and [uv](https://docs.astral.sh/uv/) (`curl -LsSf https://astral.sh/uv/install.sh | sh`).
 
 ```bash
+git clone <repository URL> && cd <repository>
 uv sync
-ADMIN_PASSWORD=change-me-admin uv run uvicorn app:app --reload           # API: http://localhost:8000
-python3 -m http.server 5173 -d frontend                                  # pages: http://localhost:5173
+```
+
+**2. Start the API** (http://localhost:8000):
+
+```bash
+ADMIN_PASSWORD=change-me-admin uv run uvicorn app:app --reload
+```
+
+**3. Serve the pages**, in a second terminal (http://localhost:5173):
+
+```bash
+python3 -m http.server 5173 -d frontend
 ```
 
 - Pages: `/` (participants), `/result.html`, `/admin.html`. API documentation: `http://localhost:8000/docs`.
 - `ADMIN_PASSWORD` is required. Optional: `DATA_DIR` (default `data/`), `CONFIG_FILE` (default `config.json`).
 - uvicorn logs each request with the client's IP, which can be linked to a session id; add `--no-access-log` to avoid it.
 - A restart keeps the data and the open/closed state, resets the rate-limit counters and re-reads `config.json`.
+
+## Deploy (SSP Cloud / Onyxia + GitHub Pages)
+
+The API runs in an Onyxia service with an exposed port; the pages are published on GitHub Pages and call the API through its Onyxia URL (both are https).
+
+**1. Onyxia service.** Launch a VS Code or Jupyter service and, **before launching**, enable the custom service port in its *Networking* tab (port `5000`). It cannot be added to a running service.
+
+**2. Install, in the service's terminal** (`~/work` is the persistent folder):
+
+```bash
+git clone <repository URL> ~/work/app && cd ~/work/app
+pip install uv && uv sync --frozen
+cat > ~/work/app.env <<EOF
+ADMIN_PASSWORD=$(openssl rand -hex 16)
+DATA_DIR=$HOME/work/data
+EOF
+chmod 600 ~/work/app.env && cat ~/work/app.env   # note the admin password
+```
+
+**3. Start (or restart) the API:**
+
+```bash
+cd ~/work/app && pkill -f "uvicorn app:app"; set -a && . ~/work/app.env && set +a && \
+nohup uv run uvicorn app:app --host 0.0.0.0 --port 5000 \
+  --proxy-headers --forwarded-allow-ips '*' --no-access-log >> ~/work/api.log 2>&1 &
+```
+
+`--host 0.0.0.0` lets Onyxia reach the API; `--proxy-headers` makes the rate limit see each participant's IP instead of Onyxia's proxy. `nohup … &` keeps it running when the terminal is closed. Run a single process (no `--workers`).
+
+**4. Public URL of the API:**
+
+```bash
+kubectl get ingress -o custom-columns=NAME:.metadata.name,HOST:.spec.rules[*].host
+```
+
+Take the host that does **not** end in `-ui` (that one is the editor) and prefix it with `https://`. Check: `https://<host>/docs` shows the API documentation.
+
+**5. GitHub Pages**, in the repository (or a fork) on GitHub:
+
+- *Actions*: on a fork, enable workflows first.
+- *Settings → Pages → Source*: **GitHub Actions**.
+- *Settings → Secrets and variables → Actions → Variables*: `API_URL` = the URL from step 4, without a trailing `/`.
+- *Actions → Deploy frontend to GitHub Pages → Run workflow*. It also runs on every push that changes `frontend/`.
+
+The pages are then at `https://<owner>.github.io/<repository>/` (participants), `…/result.html` and `…/admin.html`. Open the admin page, type the admin password and open the participant page.
+
+**Operations**, in the service's terminal:
+
+| Task | Command |
+|---|---|
+| Is it running? | `pgrep -af "uvicorn app:app"` |
+| Logs | `tail -f ~/work/api.log` |
+| Update | `cd ~/work/app && git pull && uv sync --frozen`, then step 3 |
+| Admin password | `cat ~/work/app.env` (to change it, edit the file, then step 3) |
+| Reset the answers | **Reset all answers** on the admin page |
+
+- If Onyxia restarts the service, the API stops: run step 3 again.
+- Deleting the service deletes `~/work` (code, data, password) and the next service gets a new URL: download the answers first, then redo steps 1–5.
+- Update the API and the pages together (sync the fork if the pages come from one). If an update changes the stored data format, reset the answers afterwards.
+- "The server cannot be reached" on the pages: check that `https://<owner>.github.io/<repository>/config.js` contains the API URL (otherwise rerun the workflow) and that `https://<host>/docs` answers (otherwise run step 3).
 
 ## Config
 
