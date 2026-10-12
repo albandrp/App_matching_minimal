@@ -9,7 +9,7 @@ stored as JSON/JSONL files.
 
 | File | Role |
 |---|---|
-| `minimal_app.py` | the whole API (FastAPI) |
+| `app.py` | the whole API (FastAPI) |
 | `config.json` | the courses and their % of available seats |
 | `frontend/index.html` | participant page |
 | `frontend/result.html` | result page |
@@ -26,7 +26,7 @@ Requires Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
-ADMIN_PASSWORD=change-me-admin uv run uvicorn minimal_app:app --reload   # API: http://localhost:8000
+ADMIN_PASSWORD=change-me-admin uv run uvicorn app:app --reload           # API: http://localhost:8000
 python3 -m http.server 5173 -d frontend                                  # pages: http://localhost:5173
 ```
 
@@ -94,7 +94,7 @@ Submission body: `{"session_id": ..., "items": [{"course": ..., "seats": ..., "p
 
 - Errors: `401` wrong password or unknown session · `403` participant page closed · `404` unknown session id · `409` already submitted · `422` invalid body or CSV, or missing header · `429` too many requests.
 - Rate limits per IP and per minute: 10 for admin routes, 100 for participant routes (a classroom on one wifi shares the 100).
-- CORS accepts any origin (`allow_origins=["*"]`), so the pages can be hosted anywhere; restrict it in `minimal_app.py` if needed.
+- CORS accepts any origin (`allow_origins=["*"]`), so the pages can be hosted anywhere; restrict it in `app.py` if needed.
 - Every response carries the app version (from `pyproject.toml`, edited by hand) in an `X-App-Version` header; the pages show it in their footer.
 
 ## License
