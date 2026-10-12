@@ -18,7 +18,7 @@
     .item { display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: center;
             padding: 10px; margin: 8px 0; border: 1px solid #ccc; border-radius: 10px; }
     .item > b { font-size: 1.2rem; text-align: center; color: #888; }
-    .item .label { display: block; font-weight: 600; margin-bottom: 6px; }
+    .item .course { display: block; font-weight: 600; margin-bottom: 6px; }
     .item .facts { display: flex; flex-wrap: wrap; gap: 6px; }
     .item .fact { padding: 4px 10px; border-radius: 8px; font-size: 0.95rem; background: #eef1f5; color: #222; }
     .item .fact strong { font-size: 1.25rem; }
@@ -89,7 +89,7 @@
         }
         document.getElementById("ranking").hidden = !data.items;
         document.getElementById("items").innerHTML = (data.items || []).map((item, i) =>
-          `<li class="item"><b>${i + 1}</b><div><span class="label">${item.label}</span>`
+          `<li class="item"><b>${i + 1}</b><div><span class="course">${item.course}</span>`
           + `<div class="facts"><span class="fact seats"><strong>${item.seats}%</strong> available seats</span>`
           + `<span class="fact">you have <strong>${item.points}</strong> points</span></div></div></li>`
         ).join("");

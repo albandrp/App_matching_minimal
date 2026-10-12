@@ -32,18 +32,18 @@ ID_LENGTH = 8
 
 
 class Item(BaseModel):
-    label: str
+    course: str
     seats: Annotated[int, Field(ge=0, le=100)]  # % of available seats
     points: Annotated[int, Field(ge=POINTS_RANGE[0], le=POINTS_RANGE[1])]
 
 
 CONFIG_FILE = Path(os.environ.get("CONFIG_FILE", Path(__file__).with_name("config.json")))
-LABEL_PAIRS = json.loads(CONFIG_FILE.read_text())
-SEATS = {label: seats for label, seats in LABEL_PAIRS}
-LABELS = list(SEATS)
-if len(LABELS) != len(LABEL_PAIRS) or sum(SEATS.values()) != 100:
-    raise RuntimeError(f"{CONFIG_FILE}: labels must be unique and seats must sum to 100")
-INITIAL_ORDER = sorted(LABELS, key=lambda label: SEATS[label])
+COURSE_PAIRS = json.loads(CONFIG_FILE.read_text())
+SEATS = {course: seats for course, seats in COURSE_PAIRS}
+COURSES = list(SEATS)
+if len(COURSES) != len(COURSE_PAIRS) or sum(SEATS.values()) != 100:
+    raise RuntimeError(f"{CONFIG_FILE}: courses must be unique and seats must sum to 100")
+INITIAL_ORDER = sorted(COURSES, key=lambda course: SEATS[course])
 
 
 class Submission(BaseModel):
@@ -52,9 +52,9 @@ class Submission(BaseModel):
 
     @field_validator("items")
     @classmethod
-    def items_are_each_label_once(cls, items: list[Item]) -> list[Item]:
-        if sorted(item.label for item in items) != sorted(LABELS):
-            raise ValueError(f"items must contain each of {LABELS} exactly once")
+    def items_are_each_course_once(cls, items: list[Item]) -> list[Item]:
+        if sorted(item.course for item in items) != sorted(COURSES):
+            raise ValueError(f"items must contain each of {COURSES} exactly once")
         return items
 
 
@@ -192,7 +192,7 @@ def reset() -> dict:
 def statistics() -> dict:
     submissions = read_submissions()
     sessions = read_json(SESSIONS_FILE)
-    orders = [[item["label"] for item in r["items"]] for r in submissions]
+    orders = [[item["course"] for item in r["items"]] for r in submissions]
     n = len(submissions) or 1
     return {
         "version": APP_VERSION,
@@ -200,11 +200,11 @@ def statistics() -> dict:
         "total_submissions": len(submissions),
         "total_sessions": len(sessions),
         "used_sessions": sum(1 for s in sessions.values() if s["used"]),
-        "average_rank_by_label": {
-            label: sum(order.index(label) + 1 for order in orders) / n for label in LABELS
+        "average_rank_by_course": {
+            course: sum(order.index(course) + 1 for order in orders) / n for course in COURSES
         },
         "ranked_first_count": {
-            label: sum(1 for order in orders if order[0] == label) for label in LABELS
+            course: sum(1 for order in orders if order[0] == course) for course in COURSES
         },
         "kept_initial_order": sum(1 for order in orders if order == INITIAL_ORDER),
         "assignments_uploaded": ASSIGNMENTS_FILE.exists(),
@@ -218,15 +218,15 @@ def export() -> Response:
     writer = csv.writer(out)
     writer.writerow([
         "session_id", "submitted_at",
-        *(f"rank_{i}" for i in range(1, len(LABELS) + 1)),
-        *(f"{label} points" for label in LABELS),
+        *(f"rank_{i}" for i in range(1, len(COURSES) + 1)),
+        *(f"{course} points" for course in COURSES),
     ])
     for r in submissions:
-        points = {item["label"]: item["points"] for item in r["items"]}
+        points = {item["course"]: item["points"] for item in r["items"]}
         writer.writerow([
             r["session_id"], r["submitted_at"],
-            *(item["label"] for item in r["items"]),
-            *(points[label] for label in LABELS),
+            *(item["course"] for item in r["items"]),
+            *(points[course] for course in COURSES),
         ])
     return Response(
         out.getvalue(),
@@ -262,8 +262,8 @@ async def upload_assignments(request: Request) -> dict:
         elif session_id in assignments:
             errors.append(f"row {line}: session id {session_id!r} appears twice")
         for algorithm, course in zip(ALGORITHMS, courses):
-            if course not in LABELS:
-                errors.append(f"row {line}: unknown {algorithm} course {course!r} (expected one of {LABELS})")
+            if course not in COURSES:
+                errors.append(f"row {line}: unknown {algorithm} course {course!r} (expected one of {COURSES})")
         assignments[session_id] = dict(zip(ALGORITHMS, courses))
     if errors:
         raise HTTPException(422, errors[:20])
@@ -277,7 +277,7 @@ async def upload_assignments(request: Request) -> dict:
 
 @app.post("/session/start", dependencies=[Depends(rate_limit("session")), Depends(require_active)])
 def start() -> dict:
-    points = {label: random.randint(*POINTS_RANGE) for label in LABELS}
+    points = {course: random.randint(*POINTS_RANGE) for course in COURSES}
     with _lock:
         sessions = read_json(SESSIONS_FILE)
         session_id = new_session_id(sessions)
@@ -287,7 +287,7 @@ def start() -> dict:
             "points": points,
         }
         write_json(SESSIONS_FILE, sessions)
-    items = [{"label": label, "seats": SEATS[label], "points": points[label]} for label in INITIAL_ORDER]
+    items = [{"course": course, "seats": SEATS[course], "points": points[course]} for course in INITIAL_ORDER]
     return {"session_id": session_id, "items": items}
 
 
@@ -300,8 +300,8 @@ def submit(payload: Submission) -> dict:
             raise HTTPException(401, "Unknown session")
         if session["used"]:
             raise HTTPException(409, "Session already submitted")
-        expected = {label: (SEATS[label], session["points"][label]) for label in LABELS}
-        if {item.label: (item.seats, item.points) for item in payload.items} != expected:
+        expected = {course: (SEATS[course], session["points"][course]) for course in COURSES}
+        if {item.course: (item.seats, item.points) for item in payload.items} != expected:
             raise HTTPException(422, "items must be the session's items, only reordered")
         record = {
             "id": uuid.uuid4().hex,

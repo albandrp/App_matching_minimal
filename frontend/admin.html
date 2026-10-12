@@ -65,8 +65,8 @@
         <tbody id="summary"></tbody>
       </table>
       <table>
-        <thead><tr><th>Label</th><th class="num">Average rank</th><th class="num">Ranked first</th></tr></thead>
-        <tbody id="labels"></tbody>
+        <thead><tr><th>Course</th><th class="num">Average rank</th><th class="num">Ranked first</th></tr></thead>
+        <tbody id="courses"></tbody>
       </table>
       <details>
         <summary>Raw payload</summary>
@@ -209,8 +209,8 @@
           ["Kept the initial order", data.kept_initial_order],
           ["Assignments uploaded", data.assignments_uploaded ? "yes" : "no"],
         ]);
-        rows("labels", Object.keys(data.average_rank_by_label).map(label => [
-          label, data.average_rank_by_label[label].toFixed(2), data.ranked_first_count[label],
+        rows("courses", Object.keys(data.average_rank_by_course).map(course => [
+          course, data.average_rank_by_course[course].toFixed(2), data.ranked_first_count[course],
         ]));
         document.getElementById("raw").textContent = JSON.stringify(data, null, 2);
         document.getElementById("admin").hidden = false;
